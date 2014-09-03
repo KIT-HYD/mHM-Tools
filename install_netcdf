@@ -1,0 +1,557 @@
+#!/bin/bash
+set -e
+prog=$(basename $0)
+dprog=$(dirname $0)
+pid="$$"
+# --------------------------------------------------------------------
+#
+# Bash script for installing the programs working with netcdf.
+#
+# Set parameters in Setup section below. Set also dictories to already installed packages.
+#
+# Prerequisites:          curl, c, c++, compilers (e.g., g++)
+# Optional prerequisites: fortran compiler (e.g. gfortran), java compiler
+#
+# The following software versions were tested on Ubuntu 12.04 LTS Precise Pangolin
+# and Mac OS X 10.7.5 and 10.9.1:
+#   szip=2.1
+#   hdf5=1.8.12
+#   netcdf4=4.3.0
+#   netcdf4_fortran=4.2
+#   udunits=2.1.24
+#   netcdf3=3.6.3
+#   libpng=1.6.8
+#   tiff=3.8.2
+#   proj4=4.8.0
+#   jasper=1.900.1
+#   grip_api=1.11.0
+#   cdo=1.6.2
+#   ncview=2.1.2
+#   gsl=1.12
+#   antlr=2.7.7
+#   nco=4.4.2
+#
+# Dependencies are:
+#   hdf5            <- zlib, szip
+#   netcdf4         <- hdf5
+#   netcdf4_fortran <- netcdf4
+#   grip_api        <- netcdf4, jasper, libpng
+#   cdo             <- netcdf4, proj4, grip_api, udunits
+#   nco             <- netcdf4, antlr v2 (not v3/4), gsl, udunits
+#   ncview          <- netcdf4, udunits
+#
+# The websites to check for the latest versions are:
+#   szip              - http://www.hdfgroup.org/ftp/lib-external/szip/
+#   hdf5              - http://www.hdfgroup.org/ftp/HDF5/releases/
+#   netcdf3/4_fortran - ftp://ftp.unidata.ucar.edu/pub/netcdf/
+#   proj4             - http://download.osgeo.org/proj/
+#   libpng            - http://sourceforge.net/projects/libpng/files/
+#   jasper            - http://www.ece.uvic.ca/~frodo/jasper/
+#   grip_api          - https://software.ecmwf.int/wiki/display/GRIB/Releases
+#   udunits           - ftp://ftp.unidata.ucar.edu/pub/udunits/
+#   cdo               - https://code.zmaw.de/projects/cdo/files
+#   ncview            - ftp://cirrus.ucsd.edu/pub/ncview/
+#   gsl               - ftp://ftp.gnu.org/gnu/gsl/
+#   antlr             - http://www.antlr2.org/download.html
+#   nco               - http://nco.sourceforge.net/src/
+#   tiff              - http://download.osgeo.org/libtiff/
+#
+# Note
+# - If some libraries are already installed such as png, set dolibpng=0 below.
+#   One can set EXTRA_CPPFLAGS and EXTRA_LDFLAGS if the compilers do not find it automatically,
+#   for example: EXTRA_LDFLAGS='-L/opt/local'
+# - Do not untabify this script because the netcdf_fortran 4.2 patch will not work anymore.
+# - UBUNTU
+#   install the following software from package management via the command line
+#   by typing sudo apt-get install <PACKAGE>
+#   The package name is given in < > below
+#     zlib=1.2.3.4 [installed by default]
+#     libpng=1.2.46 <libpng12-dev>
+#     tiff=3.9.5    <libtiff4-dev>
+#     antlr=2.7.7   <libantlr-dev>
+#   Do not forget to unselect the packages below
+#     dolibpng=0
+#     dotiff=0
+#     doantlr=0
+#
+# authors: Stephan Thober, Matthias Cuntz
+# created: Feb 2014
+#
+# --------------------------------------------------------------------
+
+# --------------------------------------------------------------------
+# Setup
+
+# Where to install
+prefix=/usr/local
+
+# Which steps to do
+# steps are: 1. download, 2. unpack, 3. configure, make, install, 4. clean-up
+download=1   # 1: curl sources, 0: skip
+docheck=1    # 1: make check, 2: make check but do not exit on errors, 0: skip
+dormtar=1    # 1: rm downloaded sources, 0: skip
+dosudo=1     # 1: install in ${prefix} with sudo, 0: install as user
+
+# What is to be installed in which version (setup list)
+doszip=1
+  szip=2.1
+dohdf5=1
+  hdf5=1.8.12
+donetcdf4=1
+  netcdf4=4.3.0
+donetcdf4_fortran=1
+  netcdf4_fortran=4.2
+doudunits=1
+  udunits=2.1.24
+donetcdf3=1
+  netcdf3=3.6.3
+dolibpng=0
+  libpng=1.6.9
+dotiff=0
+  tiff=3.8.2 # 4.0.3 did not work on Mac OS X 10.7.5
+doproj4=1
+  proj4=4.8.0
+dojasper=1
+  jasper=1.900.1
+dogrib_api=1
+  grib_api=1.11.0
+docdo=1
+  cdo=1.6.2
+doncview=1
+  ncview=2.1.2
+dogsl=1
+  gsl=1.12 # > 1.12 has some strange chmod a-w for gsl-config and gsl.pc
+doantlr=0
+  antlr=2.7.7
+donco=1
+  nco=4.4.2
+
+# Install netcdf-fortran for which Fortran compilers
+fortran_compilers="gfortran"
+#fortran_compilers="nagfor"
+
+# Extra CPPFLAGS and LDFLAGS, for example for libs in non-default path such as /opt/lib
+EXTRA_CPPFLAGS="-I/usr/include"
+EXTRA_LDFLAGS="-L/usr/lib"
+
+# Path to zlib's include/ lib/ directories
+ZPATH=/usr
+
+# Path to curl lib (libcurl.*) for cdo
+CURLLIB=/usr/lib
+
+# Path to X-devel for ncview. Searches for example checking X11/Intrinsic.h and X11/Xaw/Simple.h
+XPATH=/usr
+XLIB=${XPATH}/lib/X11
+XINC=${XPATH}/include/X11
+SYSTEM_DIR=/usr
+SYSTEM_LIBDIR=/usr/lib/x86_64-linux-gnu
+
+# --------------------------------------------------------------------
+# Function
+
+function download_unpack () {
+    base=${1}
+    zbase=${2}
+    http=${3}
+    # download
+    if [[ ${download} -eq 1 ]] ; then curl -L ${http}/${zbase} -o ${zbase} ; fi
+    # extract
+    case "${zbase#${base}}" in
+        ".tar")     tar -xvf  ${zbase} ;;
+        ".tar.bz")  tar -xvjf ${zbase} ;;
+        ".tar.bz2") tar -xvjf ${zbase} ;;
+        ".tar.gz")  tar -xvzf ${zbase} ;;
+        ".tar.z")   tar -xvZf ${zbase} ;;
+        ".tar.Z")   tar -xvZf ${zbase} ;;
+        ".zip")     unzip     ${zbase} ;;
+        *) printf "Error: compression not known ${zbase#${base}}\n\n" 1>&2; exit 1;;
+    esac
+}
+
+function make_install () {
+    base=${1}
+    zbase=${2}
+    bconf=${3}
+    aconf=${4}
+    # cd
+    cd ${base}
+    # configure
+    eval "${bconf}" LDFLAGS=\"-L${prefix}/lib ${EXTRA_LDFLAGS}\" \
+        CPPFLAGS=\"-I${prefix}/include ${EXTRA_CPPFLAGS}\" \
+        ./configure --prefix=${iprefix} ${aconf}
+    # make
+    make
+    # check
+    case ${docheck} in
+        1) make check ;;
+        2) set +e ; make check ; set -e ;;
+        *) : ;;
+    esac
+    # install
+    if [[ ${dosudo} -eq 1 ]] ; then
+        echo ${supw} | sudo -S make install
+    else
+        make install
+    fi
+}
+
+function cleanup () {
+    base=${1}
+    zbase=${2}
+    # clean up
+    rm -r ${base}
+    if [[ ${dormtar} -eq 1 ]] ; then rm ${zbase} ; fi
+}
+
+function download_make_install () {
+    base=${1}
+    zbase=${2}
+    http=${3}
+    bconf=${4}
+    aconf=${5}
+    download_unpack ${base} ${zbase} ${http}
+    make_install ${base} ${zbase} "${bconf}" "${aconf}"
+    cd ..
+    cleanup ${base} ${zbase}
+}
+
+
+# --------------------------------------------------------------------
+# Start
+
+# System: darwin, ...
+sys=$(uname -s | tr [A-Z] [a-z])
+iprefix=${prefix}
+
+# get sudo password
+if [[ ${dosudo} -eq 1 ]] ; then
+    printf "\n"
+    read -rs -p "sudo password for make install into ${prefix}: " supw
+    printf "\n\n"
+fi
+
+# build szip
+if [[ ${doszip} -eq 1 ]] ; then
+    printf 'Build szip\n'
+    base=szip-${szip}
+    zbase=${base}.tar.gz
+    http=http://www.hdfgroup.org/ftp/lib-external/szip/${szip}/src
+    download_make_install ${base} ${zbase} ${http}
+fi
+
+# build hdf5 # Jude was building the hdf5 also with nagfor
+if [[ ${dohdf5} -eq 1 ]] ; then
+    printf 'Build hdf5\n'
+    base=hdf5-${hdf5}
+    zbase=${base}.tar.gz
+    http=http://www.hdfgroup.org/ftp/HDF5/releases/hdf5-${hdf5}/src
+    download_make_install ${base} ${zbase} ${http} " " "--with-zlib=${ZPATH} --with-szlib=${prefix}"
+fi
+
+# build netcdf4 C
+if [[ ${donetcdf4} -eq 1 ]] ; then
+    printf 'build netcdf4-C\n'
+    base=netcdf-${netcdf4}
+    zbase=${base}.tar.gz
+    http=ftp://ftp.unidata.ucar.edu/pub/netcdf
+    download_unpack ${base} ${zbase} ${http}
+    if [[ "${sys}" == "darwin" ]] ; then
+	sed -e '/<stdio.h>/a\
+#include <config.h>/' ${base}/ncgen3/load.c > load.c.${pid}
+	mv load.c.${pid} ${base}/ncgen3/load.c
+    fi
+    make_install ${base} ${zbase} " " "--disable-dap-remote-tests"
+fi
+
+# build netcdf4-fortran
+if [[ ${donetcdf4_fortran} -eq 1 ]] ; then
+    printf 'Build netcdf4-fortran\n'
+    base=netcdf-fortran-${netcdf4_fortran}
+    zbase=${base}.tar.gz
+    http=ftp://ftp.unidata.ucar.edu/pub/netcdf
+    download_unpack ${base} ${zbase} ${http}
+    # patch libtool for netcdf4.2
+    if [[ "${netcdf4_fortran}" == "4.2" ]] ; then
+        # sed -n -e "/begin.netcdf${netcdf4_fortran}.patch/,/end.netcdf${netcdf4_fortran}.patch/p" ${dprog}/${prog} \
+        #     > patchit.${pid}
+        # patch ${base}/m4/libtool.m4 patchit.${pid}
+        sed -n -e "/nagbegin.netcdf${netcdf4_fortran}.patch/,/nagend.netcdf${netcdf4_fortran}.patch/p" \
+	    ${dprog}/${prog} > patchit.${pid}
+        patch -R ${base}/m4/libtool.m4 patchit.${pid}
+        rm patchit.${pid}
+    fi
+    # configure / make / check / install for all fortran compilers
+    for f_comp in ${fortran_compilers} ; do
+        case ${f_comp} in
+            *gfortran*)
+                printf "Build ${base}-${f_comp}\n"
+		EXTRA_CPPFLAGS="${EXTRA_CPPFLAGS} -DgFortran"
+		iprefix=${prefix}/${base}-${f_comp}
+		make_install ${base} ${zbase} "FC=${f_comp}"
+		EXTRA_CPPFLAGS="${EXTRA_CPPFLAGS% ?*}"
+		iprefix=${prefix}
+                ;;
+            *nag*)
+                printf "Build ${base}-${f_comp}\n"
+		# EXTRA_CPPFLAGS="${EXTRA_CPPFLAGS}"
+		iprefix=${prefix}/${base}-${f_comp}
+		make_install ${base} ${zbase} "FC=${f_comp} FCFLAGS='-O3 -fpp -mismatch_all -kind=byte -ieee=stop' FFLAGS='-O3 -fpp -mismatch_all -kind=byte -ieee=stop'" " "
+		# EXTRA_CPPFLAGS="${EXTRA_CPPFLAGS% ?*}"
+		iprefix=${prefix}
+	        # patch libtool on Gnu/Linux systems
+	        if [[ "${sys}" == "linux" ]] ; then
+                    sed -n -e "/nagbegin.netcdf${netcdf4_fortran}.patch/,/nagend.netcdf${netcdf4_fortran}.patch/p" \
+	    ${dprog}/${prog} > patchit.${pid}
+		    patch libtool patchit.${pid}
+		    rm patchit.${pid}
+		fi
+                ;;
+            *)
+                printf "${prog}: Fortran compiler not known: ${f_comp}.\n\n"
+                continue
+                ;;
+        esac
+        # clean for next fortran compiler
+        make clean
+	cd ..
+    done
+    cleanup ${base} ${zbase}
+fi
+
+# build netcdf3
+if [[ ${donetcdf3} -eq 1 ]] ; then
+    printf 'Build netcdf3\n'
+    base=netcdf-${netcdf3}
+    zbase=${base}.tar.gz
+    http=ftp://ftp.unidata.ucar.edu/pub/netcdf
+    download_unpack ${base} ${zbase} ${http}
+    # configure / make / check / install for all fortran compilers
+    for f_comp in ${fortran_compilers} ; do
+        case ${f_comp} in
+            *gfortran*)
+                printf "Build ${base}-${f_comp}\n"
+		EXTRA_CPPFLAGS="${EXTRA_CPPFLAGS} -DgFortran"
+		iprefix=${prefix}/${base}-${f_comp}
+		make_install ${base} ${zbase} "FC=${f_comp}" "--enable-shared --enable-f90"
+		EXTRA_CPPFLAGS="${EXTRA_CPPFLAGS% ?*}"
+		iprefix=${prefix}
+                ;;
+            *nag*)
+                printf "Build ${base}-${f_comp}\n"
+		EXTRA_CPPFLAGS="${EXTRA_CPPFLAGS} -DNAGf90Fortran"
+		iprefix=${prefix}/${base}-${f_comp}
+		make_install ${base} ${zbase} "FC=${f_comp} F77=${f_comp} FCFLAGS='-O3 -fpp -mismatch_all -kind=byte -unsharedf95 -ieee=full' FFLAGS='-O3 -fpp -mismatch_all -kind=byte -unsharedf95 -ieee=full -fixed -dusty'" "--enable-shared --enable-f90"
+		EXTRA_CPPFLAGS="${EXTRA_CPPFLAGS% ?*}"
+		iprefix=${prefix}
+                ;;
+            *)
+                printf "${prog}: Fortran compiler not known: ${f_comp}.\n\n"
+                continue
+                ;;
+        esac
+        # clean for next fortran compiler
+        make clean
+	cd ..
+    done
+    cleanup ${base} ${zbase}
+fi
+
+# build udunits
+if [[ ${doudunits} -eq 1 ]] ; then
+    printf 'build udunits\n'
+    base=udunits-${udunits}
+    zbase=${base}.tar.gz
+    http=ftp://ftp.unidata.ucar.edu/pub/udunits
+    download_make_install ${base} ${zbase} ${http}
+fi
+
+# build libpng
+if [[ ${dolibpng} -eq 1 ]] ; then
+    printf 'build libpng\n'
+    base=libpng-${libpng}
+    zbase=${base}.tar.gz
+    http=http://downloads.sourceforge.net/project/libpng/libpng16/${libpng}
+    download_make_install ${base} ${zbase} ${http}
+fi
+
+# build tiff
+if [[ ${dotiff} -eq 1 ]] ; then
+    printf 'build tiff\n'
+    base=tiff-${tiff}
+    zbase=${base}.tar.gz
+    http=http://download.osgeo.org/libtiff
+    download_make_install ${base} ${zbase} ${http}
+fi
+
+# build proj4
+if [[ ${doproj4} -eq 1 ]] ; then
+    printf 'build proj4\n'
+    base=proj-${proj4}
+    zbase=${base}.tar.gz
+    http=http://download.osgeo.org/proj
+    download_make_install ${base} ${zbase} ${http}
+fi
+
+# build jasper
+if [[ ${dojasper} -eq 1 ]] ; then
+    printf 'build jasper\n'
+    base=jasper-${jasper}
+    zbase=${base}.zip
+    http=http://www.ece.uvic.ca/~frodo/jasper/software
+    download_make_install ${base} ${zbase} ${http}
+fi
+
+# build grib_api
+if [[ ${dogrib_api} -eq 1 ]] ; then
+    printf 'build grib_api\n'
+    base=grib_api-${grib_api}
+    zbase=${base}.tar.gz
+    http=https://software.ecmwf.int/wiki/download/attachments/3473437
+    download_unpack ${base} ${zbase} ${http}
+    # change all files to be writeable, otherwise rm asks to override -r--r--r on Mac OS X
+    chmod -R u+w ${base}
+    # make install
+    make_install ${base} ${zbase}
+    cd ..
+    cleanup ${base} ${zbase}
+fi
+
+# build cdo
+if [[ ${docdo} -eq 1 ]] ; then
+    printf 'build cdo\n'
+    base=cdo-${cdo}
+    zbase=${base}.tar.gz
+    http=https://code.zmaw.de/attachments/download/6764
+    download_unpack ${base} ${zbase} ${http}
+    # patch cdo 
+    if [[ (${cdo} == '1.6.2')  ]]; then
+    	# patch grid reference.c
+    	printf '23d22\n< #include <curl/types.h>\n' | patch --input=- ${base}/src/gridreference.c
+    	# patch job.c
+    	printf '352d351\n< #  include <curl/types.h>\n' | patch --input=- ${base}/src/job.c
+    fi
+    make_install ${base} ${zbase} " " "--prefix=${prefix} --with-szlib=${prefix} --with-hdf5=${SYSTEM_DIR} --with-jasper=${SYSTEM_DIR} --with-grib_api=${SYSTEM_DIR} --with-proj=${SYSTEM_DIR} --with-udunits2=${SYSTEM_LIBDIR} --with-curl=${SYSTEM_DIR} --with-netcdf=${SYSTEM_DIR}"
+fi
+
+# build gsl
+if [[ ${dogsl} -eq 1 ]] ; then
+    printf 'build gsl\n'
+    base=gsl-${gsl}
+    zbase=${base}.tar.gz
+    http=ftp://ftp.gnu.org/gnu/gsl
+    download_make_install ${base} ${zbase} ${http}
+fi
+
+# build antlr
+if [[ ${doantlr} -eq 1 ]] ; then
+    printf 'build antlr\n'
+    base=antlr-${antlr}
+    zbase=${base}.tar.gz
+    http=http://www.antlr2.org/download
+    download_make_install ${base} ${zbase} ${http}
+fi
+
+# build nco
+if [[ ${donco} -eq 1 ]] ; then
+    printf 'build nco\n'
+    base=nco-${nco}
+    zbase=${base}.tar.gz
+    http=http://nco.sourceforge.net/src
+    download_unpack ${base} ${zbase} ${http}
+    # change some unknown LaTeX
+    sed -e '/textdegree/d' ${base}/doc/nco.texi > tmp.${pid}
+    mv tmp.${pid} ${base}/doc/nco.texi
+    # make install
+    make_install ${base} ${zbase} "GSL_ROOT=${prefix} ANTLR_ROOT=${SYSTEM_DIR} PATH_TO_NCGEN=${SYSTEM_DIR}/bin/ncgen NETCDF_INC=${SYSTEM_DIR}/include NETCDF_LIB=${SYSTEM_DIR}/lib NETCDF4_ROOT=${SYSTEM_DIR} UDUNITS2_PATH=${SYSTEM_DIR}" "--enable-dap-netcdf --enable-gsl"
+    cd ..
+    cleanup ${base} ${zbase}
+fi
+
+# build ncview
+if [[ ${doncview} -eq 1 ]] ; then
+    printf 'build ncview\n'
+    base=ncview-${ncview}
+    zbase=${base}.tar.gz
+    http=ftp://cirrus.ucsd.edu/pub/ncview
+    download_unpack ${base} ${zbase} ${http}
+    # change some defaults in code
+    sed -e '/^#define DEFAULT_BLOWUP[[:blank:]]/s/DEFAULT_BLOWUP.*/DEFAULT_BLOWUP 8/' \
+        -e '/^#define DEFAULT_MIN_MAX_METHOD[[:blank:]]/s/DEFAULT_MIN_MAX_METHOD.*/DEFAULT_MIN_MAX_METHOD MIN_MAX_METHOD_EXHAUST/' \
+        -e '/^#define DEFAULT_BLOWUP_TYPE[[:blank:]]/s/DEFAULT_BLOWUP_TYPE.*/DEFAULT_BLOWUP_TYPE BLOWUP_REPLICATE/' \
+        -e '/^#define DEFAULT_AUTO_OVERLAY[[:blank:]]/s/DEFAULT_AUTO_OVERLAY.*/DEFAULT_AUTO_OVERLAY FALSE/' \
+        -e '/options.blowup[[:blank:]]\{1,\}=/s/blowup[[:blank:]]\{1,\}=.*/blowup = DEFAULT_BLOWUP;/' \
+        -e '/options.beep_on_restart[[:blank:]]\{1,\}=/s/beep_on_restart[[:blank:]]\{1,\}=.*/beep_on_restart = TRUE;/' \
+        ${base}/src/ncview.c > tmp.${pid}
+    mv tmp.${pid} ${base}/src/ncview.c
+    # Mac OS X uses .dylib for shared libraries, .so hardcoded in configure
+    if [[ "${sys}" == "darwin" ]] ; then
+	sed -e 's/\.so/.dylib/' -e '/RPDIR=/s/RPDIR=.*/RPDIR=${word:2}/' ${base}/configure > tmp.${pid}
+	mv tmp.${pid} ${base}/configure
+	chmod +x ${base}/configure
+    fi
+    # make install
+    make_install ${base} ${zbase} " " "--prefix=${prefix} --with-nc_config=${NC_DIR}/bin/nc-config --with-udunits2_incdir=${PNG_INCDIR}/include --with-udunits2_libdir=${PNG_LIBDIR} --x-libraries=${XLIB} --x-includes=${XINC} --with-png_incdir=${PNG_INCDIR}/include --with-png_libdir=${PNG_LIBDIR}"
+    cd ..
+    cleanup ${base} ${zbase}
+fi
+
+# --------------------------------------------------------------------
+# Finish
+
+exit 0
+
+# --------------------------------------------------------------------
+# netcdf4.2 patch for nagfor found on Unidata website
+# begin.netcdf4.2.patch
+# 4054,4058d4053
+# *** netcdf-fortran-4.2/m4/libtool.m4	2011-09-27 08:17:58.000000000 -0600
+# --- netcdf-fortran-4.2.new/m4/libtool.m4	2012-10-30 20:00:55.000000000 -0600
+# ***************
+# *** 4051,4056 ****
+# --- 4051,4062 ----
+#   	_LT_TAGVAR(lt_prog_compiler_pic, $1)='--shared'
+#   	_LT_TAGVAR(lt_prog_compiler_static, $1)='--static'
+#   	;;
+# +       # NAG 5.3.1
+# +       nag*)
+# + 	_LT_TAGVAR(lt_prog_compiler_wl, $1)='-Wl,-Wl,,'
+# + 	_LT_TAGVAR(lt_prog_compiler_pic, $1)='-pic'
+# + 	_LT_TAGVAR(lt_prog_compiler_static, $1)='-Bstatic'
+# + 	;;
+#         pgcc* | pgf77* | pgf90* | pgf95* | pgfortran*)
+#           # Portland Group compilers (*not* the Pentium gcc compiler,
+#   	# which looks to be a dead project)
+# ***************
+# *** 4477,4482 ****
+# --- 4483,4491 ----
+#   	lf95*)				# Lahey Fortran 8.1
+#   	  _LT_TAGVAR(whole_archive_flag_spec, $1)=
+#   	  tmp_sharedflag='--shared' ;;
+# + 	nag*)				# NAG 5.3.1
+# +           _LT_TAGVAR(whole_archive_flag_spec, $1)='${wl}--whole-archive`for conv in $convenience\"\"; do test  -n \"$conv\" && new_convenience=\"$new_convenience ${wl}$conv\"; done; func_echo_all \"$new_convenience\"` ${wl}--no-whole-archive'
+# + 	  tmp_sharedflag='-pic -Wl,-shared' ;;
+#   	xl[[cC]]* | bgxl[[cC]]* | mpixl[[cC]]*) # IBM XL C 8.0 on PPC (deal with xlf below)
+#   	  tmp_sharedflag='-qmkshrobj'
+#   	  tmp_addflag= ;;
+# # end.netcdf4.2.patch
+
+# # --------------------------------------------------------------------
+# # netcdf4.2 patch for nagfor from NAG support - attention wrong way round, use patch -R
+# # nagbegin.netcdf4.2.patch
+# 4054,4058d4053
+# <       nagfor*)
+# <         _LT_TAGVAR(lt_prog_compiler_wl, $1)='-Wl,-Wl,,'
+# <         _LT_TAGVAR(lt_prog_compiler_pic, $1)='-PIC'
+# <         _LT_TAGVAR(lt_prog_compiler_static, $1)='-Bstatic'
+# <         ;;
+# 4485,4488d4479
+# <       nagfor*) # NAG Fortran 5.3
+# <         _LT_TAGVAR(whole_archive_flag_spec, $1)='${wl}--whole-archive`for conv in $convenience\"\"; do test  -n \"$conv\" && new_convenience=\"$new_convenience,$conv\"; done; func_echo_all \"$new_convenience\"`,-Wl,,--no-whole-archive'
+# <         tmp_sharedflag='-Wl,-shared'
+# <           ;;
+# 4515,4517d4505
+# <       nagfor*) # NAG Fortran 5.3
+# <         _LT_TAGVAR(archive_cmds, $1)='$CC '"$tmp_sharedflag"' $libobjs $deplibs $compiler_flags ${wl}-soname,,$soname -o $lib'
+# <           ;;
+# nagend.netcdf4.2.patch
