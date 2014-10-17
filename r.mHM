@@ -1,0 +1,160 @@
+#!/usr/bin/env python
+#
+############################################################################
+#
+# MODULE:	r.mHM
+# AUTHOR(S):	Conrad Jackisch
+# PURPOSE:	Preprocessing of DEM and further inputs for mHM
+#
+# COPYRIGHT:	(cc) 2014 by jackisch@kit.edu
+#
+#############################################################################
+
+#%Module
+#% description: Prepares mHM input files based on a DEM, Soil and Landuse map.
+#% keywords: raster, hydrology
+#%end
+#%option
+#% key: project
+#% type: string
+#% required: no
+#% multiple: no
+#% description: name of the project to retrieve created maps
+#% answer: mHM_test
+#%end
+#%option
+#% key: DEM
+#% type: string
+#% required: yes
+#% multiple: no
+#% description: give name of DEM map
+#% answer: DEMmap
+#%end
+#%option
+#% key: rounding
+#% type: integer
+#% required: no
+#% multiple: no
+#% description: desired level of rounding [m]
+#% answer: 1000
+#%end
+#%option
+#% key: resolution
+#% type: integer
+#% required: no
+#% multiple: no
+#% description: desired resolution [m]
+#% answer: 25
+#%end
+#%option
+#% key: gauge_e
+#% type: float
+#% required: yes
+#% multiple: no
+#% description: give gauge position (east)
+#% answer: 4574642.167
+#%end
+#%option
+#% key: gauge_n
+#% type: float
+#% required: yes
+#% multiple: no
+#% description: give gauge position (north)
+#% answer: 2832363.76
+#%end
+#%option
+#% key: gauge_ID
+#% type: integer
+#% required: yes
+#% multiple: no
+#% description: give gauge ID
+#% answer: 42
+#%end
+#%option
+#% key: SOIL
+#% type: string
+#% required: yes
+#% multiple: no
+#% description: give name of SOIL map
+#% answer: SOILmap
+#%end
+#%option
+#% key: LANDUSE
+#% type: string
+#% required: yes
+#% multiple: no
+#% description: give name of LANDUSE map
+#% answer: LUmap
+#%end
+
+import sys
+import os
+import atexit
+import math
+import grass.script as grass
+
+# what to do in case of user break:
+def cleanup():
+    for map in [temp_dist, temp_val]:
+	if map:
+	    grass.run_command('g.remove', quiet = True, flags = 'f', rast = map)
+
+def main():
+    global temp_dist, temp_val
+
+    PROJ = options['project']
+    DEM = options['DEMmap']
+    rounding = int(options['rounding'])
+    resolution = int(options['resolution'])
+    gauge_e = float(options['gauge_e'])
+    gauge_n = float(options['gauge_n'])
+    gauge_ID = int(options['gauge_ID'])
+    SOIL = options['SOILmap']
+    LU = options['LUmap']
+
+    # PREPARE REGION SETTINGS
+    grass.run_command('g.region', rast=DEM)
+    kv = grass.region()
+    north = math.ceil(float(kv['n'])/rounding)*rounding
+    south = math.floor(float(kv['s'])/rounding)*rounding
+    east = math.ceil(float(kv['e'])/rounding)*rounding
+    west = math.floor(float(kv['w'])/rounding)*rounding
+    grass.run_command('g.region', n = north, s = south, e = east, w = west, res = resolution, region = PROJ)
+    print 'Region set to N=',north,' S=',south,' E=',east,' W=',west
+    print 'Region Name set to ',PROJ
+
+    # FILL DEM
+
+
+#####################################
+#                                   #
+#  WORK IN PROGRESS ... I AM HERE.  #
+#                                   #
+#####################################
+
+
+    if metric == 'euclidean':
+	metric = 'squared'
+	radius = radius * radius
+
+    #check if input file exists
+    if not grass.find_file(input)['file']:
+	grass.fatal(_("<%s> does not exist.") % input)
+
+    grass.run_command('r.grow.distance',  input = input, metric = metric,
+		      distance = temp_dist, value = temp_val)
+
+    grass.mapcalc(
+	"$output = if(!isnull($input),$old,if($dist < $radius,$new,null()))",
+	output = output, input = input, radius = radius,
+	old = old, new = new, dist = temp_dist)
+
+    grass.run_command('r.colors', map = output, raster = input)
+
+    # write cmd history:
+    grass.raster_history(output)
+
+if __name__ == "__main__":
+    options, flags = grass.parser()
+    atexit.register(cleanup)
+    main()
