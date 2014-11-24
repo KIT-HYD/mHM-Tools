@@ -130,7 +130,7 @@ def main():
     west = math.floor(float(kv['w'])/rounding)*rounding
     grass.run_command('g.region', n = north, s = south, e = east, w = west, res = resolution, region = PROJ)
     print 'Region set to N=',north,' S=',south,' E=',east,' W=',west
-    print 'Region Name set to ',$PROJ
+    print 'Region Name set to ',PROJ
 
     # FILL DEM
     grass.run_command('r.hydrodem -a', input=DEM, output=DEMfill, mod=4, size=4)
@@ -139,7 +139,7 @@ def main():
     print 'Created partly filled DEMsoftfill for further analysis.'
 
     # RUN R.WATERSHED ANALYSIS
-    grass.run_command('r.watershed -s --overwrite', elev = DEMsoftfill, drain = $PROJ.fdir, basin = $PROJ.bas, stream = $PROJ.str, thresh = wthreshold*10)
+    grass.run_command('r.watershed -s --overwrite', elev = DEMsoftfill, drain = PROJ+'.fdir', basin = PROJ+'.bas', stream = PROJ+'.str', thresh = wthreshold*10)
     print 'Analysed DEM for drainage, streams and bounds.'
 
     # BASIN OUTLET
@@ -155,7 +155,7 @@ def main():
 
     # UPDATE FLOW DIR AS ARC GIS CONVENTION
     os.system("echo '1 -1 = 128 \n2 -2 = 64 \n3 -3 = 32 \n4 -4 = 16 \n5 -5 = 8 \n6 -6 = 4 \n7 -7 = 2 \n8 -8 = 1 \n0 = 255' > f_dir_reclass")
-    grass.run_command('r.reclass', input=$PROJ.fdir, output=$PROJ.fdir_arc, rules='f_dir_reclass')
+    grass.run_command('r.reclass', input=PROJ+'.fdir', output=PROJ+'.fdir_arc', rules='f_dir_reclass')
 
     grass.run_command('r.mask', raster=PROJ+'.basin')
     # OUTPUT FILES FOR mHM
