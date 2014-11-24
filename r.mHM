@@ -47,6 +47,14 @@
 #% answer: 25
 #%end
 #%option
+#% key: waterthreshold
+#% type: integer
+#% required: yes
+#% multiple: no
+#% description: watershed threshold
+#% answer: 5000
+#%end
+#%option
 #% key: gauge_e
 #% type: float
 #% required: yes
@@ -106,6 +114,7 @@ def main():
     DEM = options['DEMmap']
     rounding = int(options['rounding'])
     resolution = int(options['resolution'])
+    wthreshold = int(options['waterthreshold'])
     gauge_e = float(options['gauge_e'])
     gauge_n = float(options['gauge_n'])
     gauge_ID = int(options['gauge_ID'])
@@ -121,38 +130,43 @@ def main():
     west = math.floor(float(kv['w'])/rounding)*rounding
     grass.run_command('g.region', n = north, s = south, e = east, w = west, res = resolution, region = PROJ)
     print 'Region set to N=',north,' S=',south,' E=',east,' W=',west
-    print 'Region Name set to ',PROJ
+    print 'Region Name set to ',$PROJ
 
     # FILL DEM
+    grass.run_command('r.hydrodem -a', input=DEM, output=DEMfill, mod=4, size=4)
+    print 'Created fully filled DEMfill'
+    grass.run_command('r.hydrodem', input=DEM, output=DEMsoftfill, mod=15, size=4)
+    print 'Created partly filled DEMsoftfill for further analysis.'
 
+    # RUN R.WATERSHED ANALYSIS
+    grass.run_command('r.watershed -s --overwrite', elev = DEMsoftfill, drain = $PROJ.fdir, basin = $PROJ.bas, stream = $PROJ.str, thresh = wthreshold*10)
+    print 'Analysed DEM for drainage, streams and bounds.'
 
-#####################################
-#                                   #
-#  WORK IN PROGRESS ... I AM HERE.  #
-#                                   #
-#####################################
+    # BASIN OUTLET
+    os.system("echo "+str(gauge_e)+","+str(gauge_n+","+gauge_ID+" > gauge_pos_sim.txt")
+    grass.run_command('r.in.xyz input=gauge_pos_sim.txt --overwrite', output=PROJ+'.gauge', separator=',')
+    grass.run_command('r.water.outlet --overwrite', input = PROJ+'.fdir', output = PROJ+'.basin', coordinates = gauge_e,gauge_n)
+    print 'Gauge set. Basin Created.'
 
+    # SLOPE ASPECT
+    grass.run_command('r.slope.aspect --overwrite', elevation=DEMfill, slope=PROJ+'.slope', aspect=PROJ+'.aspect')
+    # RE-RUN R.WATERSHED ANALYSIS
+    grass.run_command('r.watershed -a -b --overwrite', elev=DEMsoftfill, accumulation=PROJ+'.faccum', tci=PROJ+'.tci', drainage=PROJ+'.fdir', stream=PROJ+'.str', threshold=wthreshold, memory=1000)
 
-    if metric == 'euclidean':
-	metric = 'squared'
-	radius = radius * radius
+    # UPDATE FLOW DIR AS ARC GIS CONVENTION
+    os.system("echo '1 -1 = 128 \n2 -2 = 64 \n3 -3 = 32 \n4 -4 = 16 \n5 -5 = 8 \n6 -6 = 4 \n7 -7 = 2 \n8 -8 = 1 \n0 = 255' > f_dir_reclass")
+    grass.run_command('r.reclass', input=$PROJ.fdir, output=$PROJ.fdir_arc, rules='f_dir_reclass')
 
-    #check if input file exists
-    if not grass.find_file(input)['file']:
-	grass.fatal(_("<%s> does not exist.") % input)
-
-    grass.run_command('r.grow.distance',  input = input, metric = metric,
-		      distance = temp_dist, value = temp_val)
-
-    grass.mapcalc(
-	"$output = if(!isnull($input),$old,if($dist < $radius,$new,null()))",
-	output = output, input = input, radius = radius,
-	old = old, new = new, dist = temp_dist)
-
-    grass.run_command('r.colors', map = output, raster = input)
-
-    # write cmd history:
-    grass.raster_history(output)
+    grass.run_command('r.mask', raster=PROJ+'.basin')
+    # OUTPUT FILES FOR mHM
+    grass.run_command('r.out.arc --overwrite', input=DEMfill, output='dem.asc', dp=0) 
+    grass.run_command('r.out.arc --overwrite', input=PROJ+'.aspect', output='aspect.asc', dp=0)
+    grass.run_command('r.out.arc --overwrite', input=PROJ+'.slope', output='slope.asc', dp=0)
+    grass.run_command('r.out.arc --overwrite', input=PROJ+'.faccum', output='facc.asc', dp=0)
+    grass.run_command('r.out.arc --overwrite', input=PROJ+'.fdir_arc', output='fdir.asc', dp=0)
+    grass.run_command('r.out.arc --overwrite', input=PROJ+'.gauge', output='gauge.asc', dp=0)
+    grass.run_command('r.out.arc --overwrite', input=LU, output='LUclass.asc', dp=0)
+    grass.run_command('r.out.arc --overwrite', input=SOIL, output='soil.asc', dp=0)
 
 if __name__ == "__main__":
     options, flags = grass.parser()
